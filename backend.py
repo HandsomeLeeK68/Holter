@@ -38,7 +38,7 @@ CLASS_INFO = {
 
 CLASSES_KEYS = ['N', 'S', 'V', 'F', 'Q']
 
-def load_arrhythmia_model(model_path="model.h5"):
+def load_arrhythmia_model(model_path="model\\ecg_model_code 17_t5.h5"):
     try:
         model = load_model(model_path, compile=False)
         return model
@@ -127,7 +127,6 @@ def predict_from_segments(segments_array, model):
     return predicted_codes, y_pred_indices
 
 # --- HÀM VẼ ĐỒ THỊ (HỖ TRỢ DARK MODE) ---
-
 def set_plot_style(dark_mode=True):
     """Cấu hình style cho Matplotlib"""
     if dark_mode:
