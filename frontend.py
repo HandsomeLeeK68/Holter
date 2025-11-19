@@ -1,8 +1,10 @@
 #.\venv\Scripts\activate
 #streamlit run frontend.py
+#chạy thử với id=35
 import streamlit as st
 import pandas as pd
 import numpy as np
+import ast # Dùng để parse string list trong CSV nếu cần
 from backend import (
     load_arrhythmia_model, 
     get_model_input_length,
@@ -53,7 +55,6 @@ else:
         st.divider()
         
         if is_dark_mode:
-    # --- DARK MODE (SÁNG HƠN) ---
             dark_css = """
             <style>
                 /* Nền chính: Xám Chì (Sáng hơn đen cũ) */
@@ -77,7 +78,7 @@ else:
             st.markdown(dark_css, unsafe_allow_html=True)
 
         else:
-            # --- LIGHT MODE (DỊU MẮT) ---
+            # LIGHT MODE
             light_css = """
             <style>
                 /* Nền chính: Trắng sứ (Không dùng trắng tinh #FFF) */
@@ -98,8 +99,8 @@ else:
         st.info(f"📏 Model yêu cầu độ dài nhịp tim: **{REQUIRED_LENGTH}** điểm dữ liệu.")
     
     # --- UPLOAD DATA (JSON & CSV) ---
-    st.subheader("1. Tải lên dữ liệu tín hiệu điện tim (JSON hoặc CSV)")   
-    uploaded_file = st.file_uploader("Tải lên dữ liệu nhịp tim (JSON hoặc CSV)", type=["json", "csv"])
+    st.subheader("Tải lên dữ liệu điện tim (JSON hoặc CSV)")   
+    uploaded_file = st.file_uploader("Tải lên dữ liệu điện tim (JSON hoặc CSV)", type=["json", "csv"])
     
     raw_ecg = None
     data_source_name = ""
@@ -158,24 +159,19 @@ else:
             with st.expander("⚙️ Cấu hình nâng cao (Wavelet & Peak Detection)", expanded=False):
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.markdown("**Lọc nhiễu (Wavelet)**")
+                    st.markdown("**Lọc nhiễu (DWT)**")
                     wavelet_type = st.selectbox("Loại Wavelet", ['sym8', 'db4', 'db8', 'coif5'], index=0)
                     wavelet_level = st.number_input("Level", 1, 9, 1)
                 with col2:
                     st.markdown("**Phát hiện đỉnh R**")
                     r_peak_height = st.number_input("Chiều cao tối thiểu", 0.1, 10.0, 0.5, 0.1)
                     r_peak_distance = st.number_input("Khoảng cách tối thiểu", 50, 500, 150, 10)
-
-
-
-
-
-
         except Exception as e:
             st.error(f"Lỗi đọc file: {e}")
 
-    # --- PHÂN TÍCH ---
+# --- PHÂN TÍCH ---
     if raw_ecg is not None:
+        # Nút bấm chỉ làm nhiệm vụ TÍNH TOÁN và LƯU VÀO SESSION STATE
         if st.button("🚀 Bắt đầu Chẩn đoán", type="primary"):
             
             # 1. Lọc nhiễu & Phân đoạn
@@ -190,6 +186,9 @@ else:
 
             if len(segments) == 0:
                 st.warning("Không phát hiện được nhịp tim nào. Hãy thử giảm 'Chiều cao đỉnh R'.")
+                # Xóa kết quả cũ nếu tính toán thất bại
+                if 'analysis_result' in st.session_state:
+                    del st.session_state.analysis_result
             else:
                 # 2. Dự đoán
                 with st.spinner("AI đang phân tích từng nhịp tim..."):
@@ -197,72 +196,107 @@ else:
                 
                 st.success(f"Hoàn tất! Đã phân tích {len(segments)} nhịp tim.")
 
-                # --- KẾT QUẢ TỔNG QUAN ---
-                st.subheader("1. Biểu đồ Điện tâm đồ (ECG)")
-                fig_raw = plot_raw_signal_with_peaks(raw_ecg, valid_peaks, predicted_codes, dark_mode=is_dark_mode)
-                st.pyplot(fig_raw)
+                # LƯU KẾT QUẢ VÀO SESSION STATE
+                st.session_state.analysis_result = {
+                    "raw_ecg": raw_ecg, # Lưu lại tín hiệu gốc tương ứng với kết quả này
+                    "segments": segments,
+                    "valid_peaks": valid_peaks,
+                    "predicted_codes": predicted_codes
+                }
 
-                # --- THỐNG KÊ & LỜI KHUYÊN ---
-                st.subheader("2. Kết quả Chẩn đoán & Lời khuyên")
-                
-                # Đếm số lượng từng loại
-                counts = pd.Series(predicted_codes).value_counts()
-                
-                col_left, col_right = st.columns([1, 1.5])
-                
-                with col_left:
-                    st.markdown("### Thống kê nhịp")
-                    for code, count in counts.items():
-                        info = CLASS_INFO[code]
-                        percent = (count / len(segments)) * 100
-                        st.metric(
-                            label=info['name'], 
-                            value=f"{count} nhịp", 
-                            delta=f"{percent:.1f}%"
-                        )
+        # PHẦN HIỂN THỊ (Nằm ngoài khối if st.button)
+        # Kiểm tra xem đã có kết quả trong Session State chưa
+        if 'analysis_result' in st.session_state:
+            
+            # Lấy dữ liệu từ Session State ra để hiển thị
+            res = st.session_state.analysis_result
+            
+            # Kiểm tra an toàn: Nếu người dùng đổi file khác mà chưa bấm nút chạy lại, 
+            # dữ liệu raw_ecg hiện tại sẽ khác dữ liệu đã lưu. 
+            # Ta có thể cảnh báo hoặc vẫn hiện kết quả cũ. Ở đây ta cứ hiện kết quả đã lưu.
+            saved_raw_ecg = res["raw_ecg"]
+            saved_segments = res["segments"]
+            saved_peaks = res["valid_peaks"]
+            saved_codes = res["predicted_codes"]
 
-                with col_right:
-                    st.markdown("### Lời khuyên Bác sĩ AI")
-                    # Chỉ hiển thị lời khuyên cho các loại nhịp ĐƯỢC PHÁT HIỆN
-                    detected_codes = counts.index.tolist()
+            # --- KẾT QUẢ TỔNG QUAN ---
+            st.subheader("1. Biểu đồ Điện tâm đồ (ECG)")
+            # Lưu ý: Dùng saved_raw_ecg để đảm bảo đồng bộ với đỉnh R đã tìm
+            fig_raw = plot_raw_signal_with_peaks(saved_raw_ecg, saved_peaks, saved_codes, dark_mode=is_dark_mode)
+            st.pyplot(fig_raw)
+
+            # --- THỐNG KÊ & LỜI KHUYÊN ---
+            st.subheader("2. Kết quả Chẩn đoán & Lời khuyên")
+            
+            # Đếm số lượng từng loại
+            counts = pd.Series(saved_codes).value_counts()
+            
+            col_left, col_right = st.columns([1, 1.5])
+            
+            with col_left:
+                st.markdown("### Thống kê nhịp")
+                for code, count in counts.items():
+                    info = CLASS_INFO[code]
+                    percent = (count / len(saved_segments)) * 100
                     
-                    # Sắp xếp ưu tiên hiển thị bệnh lý trước, bình thường sau
-                    priority_order = ['V', 'S', 'F', 'Q', 'N']
-                    detected_codes.sort(key=lambda x: priority_order.index(x) if x in priority_order else 99)
+                    delta_value = f"{percent:.1f}%"
+    
+                    if code != 'N': 
+                        delta_for_color = -percent
+                    else:
+                        delta_for_color = percent
 
-                    for code in detected_codes:
-                        info = CLASS_INFO[code]
-                        # Xác định kiểu style box dựa trên loại nhịp
-                        box_class = "success-box" if code == 'N' else "danger-box" if code in ['V', 'F'] else "warning-box"
-                        
-                        st.markdown(f"""
-                        <div class="advice-box {box_class}">
-                            <strong>{info['name']}</strong> ({counts[code]} lần)<br>
-                            {info['advice']}
-                        </div>
-                        """, unsafe_allow_html=True)
+                    st.metric(
+                        label=info['name'], 
+                        value=f"{count} nhịp", 
+                        delta=delta_for_color, 
+                        delta_color="normal" 
+                    )
+                    st.markdown(f"<div style='margin-top: -15px; margin-bottom: 20px; font-size: 13px; color: grey;'>({delta_value})</div>", unsafe_allow_html=True)
 
-                # --- CHI TIẾT TỪNG NHỊP ---
-                st.subheader("3. Soi chi tiết từng nhịp")
-                beat_idx = st.slider("Kéo để xem từng nhịp tim:", 0, len(segments)-1, 0)
-                
-                curr_code = predicted_codes[beat_idx]
-                curr_info = CLASS_INFO[curr_code]
-                
-                col_b1, col_b2 = st.columns([3, 1])
-                with col_b1:
-                    fig_seg = plot_beat_segment(segments[beat_idx], curr_code, dark_mode=is_dark_mode)
-                    st.pyplot(fig_seg)
-                with col_b2:
-                    st.info(f"**Nhịp thứ:** {beat_idx + 1}")
-                    st.markdown(f"**Phân loại:**\n\n{curr_info['name']}")
+            with col_right:
+                st.markdown("### Lời khuyên Bác sĩ AI")
+                detected_codes = counts.index.tolist()
+                priority_order = ['V', 'S', 'F', 'Q', 'N']
+                detected_codes.sort(key=lambda x: priority_order.index(x) if x in priority_order else 99)
 
-                # Bảng dữ liệu thô
-                with st.expander("Xem bảng dữ liệu chi tiết"):
-                    df_res = pd.DataFrame({
-                        "STT": range(1, len(predicted_codes)+1),
-                        "Vị trí (Sample)": valid_peaks,
-                        "Mã": predicted_codes,
-                        "Chẩn đoán": [CLASS_INFO[c]['name'] for c in predicted_codes]
-                    })
-                    st.dataframe(df_res, use_container_width=True)
+                for code in detected_codes:
+                    info = CLASS_INFO[code]
+                    box_class = "success-box" if code == 'N' else "danger-box" if code in ['V', 'F'] else "warning-box"
+                    
+                    st.markdown(f"""
+                    <div class="advice-box {box_class}">
+                        <strong>{info['name']}</strong> ({counts[code]} lần)<br>
+                        {info['advice']}
+                    </div>
+                    """, unsafe_allow_html=True)
+
+
+            # --- CHI TIẾT TỪNG NHỊP ---
+            st.subheader("3. Soi chi tiết từng nhịp")
+            
+            # Slider nằm ở đây, khi kéo nó sẽ re-run, nhưng vì 'analysis_result' vẫn còn trong session_state
+            # nên đoạn code này vẫn được thực thi -> Hình ảnh sẽ cập nhật theo slider
+            beat_idx = st.slider("Kéo để xem từng nhịp tim:", 0, len(saved_segments)-1, 0)
+            
+            curr_code = saved_codes[beat_idx]
+            curr_info = CLASS_INFO[curr_code]
+            
+            col_b1, col_b2 = st.columns([3, 1])
+            with col_b1:
+                # Chú ý: index mảng bắt đầu từ 0, beat_idx lấy từ slider
+                fig_seg = plot_beat_segment(saved_segments[beat_idx], curr_code, dark_mode=is_dark_mode)
+                st.pyplot(fig_seg)
+            with col_b2:
+                st.info(f"**Nhịp thứ:** {beat_idx + 1}") # Hiển thị +1 cho người dùng dễ đọc
+                st.markdown(f"**Phân loại:**\n\n{curr_info['name']}")
+
+            # Bảng dữ liệu thô
+            with st.expander("Xem bảng dữ liệu chi tiết"):
+                df_res = pd.DataFrame({
+                    "STT": range(1, len(saved_codes)+1),
+                    "Vị trí (Sample)": saved_peaks,
+                    "Mã": saved_codes,
+                    "Chẩn đoán": [CLASS_INFO[c]['name'] for c in saved_codes]
+                })
+                st.dataframe(df_res, use_container_width=True)

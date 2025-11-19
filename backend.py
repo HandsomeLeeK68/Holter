@@ -1,10 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from tensorflow.keras.models import load_model
-from scipy.signal import find_peaks
-import pywt 
-import ast # Dùng để parse string list trong CSV nếu cần
-
+from scipy.signal import find_peaks # Phát hiện đỉnh R
+import pywt # Thư viện Wavelet
 # --- CẤU HÌNH DỮ LIỆU & LỜI KHUYÊN ---
 
 # Định nghĩa thông tin chi tiết cho 5 lớp (Classes)
@@ -51,8 +49,8 @@ def get_model_input_length(model):
     try:
         input_shape = model.input_shape
         if input_shape and len(input_shape) >= 2 and input_shape[1] is not None:
-            return int(input_shape[1])
-        
+            return int(input_shape[1])      #input_shape = (None, 187, 1) = (batch_size, input_length, features)
+        # Nếu không lấy được từ input_shape, thử lấy từ lớp đầu tiên
         first_layer = model.layers[0]
         if hasattr(first_layer, 'input_shape'):
             cfg_shape = first_layer.input_shape
@@ -64,7 +62,8 @@ def get_model_input_length(model):
 
 def denoise_signal_wavelet(signal, wavelet='sym8', level=1):
     """Lọc nhiễu Wavelet"""
-    if len(signal) < 10: return signal
+    if len(signal) < 10:
+        return signal
     try:
         coeffs = pywt.wavedec(signal, wavelet, mode='per', level=level) 
         detail_coeffs = coeffs[-1]
@@ -98,10 +97,8 @@ def detect_and_segment(denoised_ecg_signal, r_peak_height=0.5, r_peak_distance=1
     for peak_loc in peaks:
         start = peak_loc - window_before
         end = peak_loc + window_after + 1
-        
         if start < 0 or end > len(denoised_ecg_signal):
             continue
-            
         segment = denoised_ecg_signal[start : end]
         if len(segment) == output_length:
             segments.append(segment)
@@ -115,7 +112,7 @@ def detect_and_segment(denoised_ecg_signal, r_peak_height=0.5, r_peak_distance=1
 def predict_from_segments(segments_array, model):
     """Dự đoán và trả về mã lớp (N, S, V...)"""
     if segments_array.ndim == 2:
-        X = segments_array.reshape(-1, segments_array.shape[1], 1)
+        X = segments_array.reshape(-1, segments_array.shape[1], 1)  # Thêm chiều features=1
     else:
         X = segments_array
 
@@ -150,7 +147,7 @@ def set_plot_style(dark_mode=True):
             "ytick.color": "black"
         })
 
-def plot_raw_signal_with_peaks(raw_ecg, peaks, predicted_codes, dark_mode=True):
+def plot_raw_signal_with_peaks(raw_ecg, peaks, predicted_codes, dark_mode=False):
     set_plot_style(dark_mode)
     fig, ax = plt.subplots(figsize=(15, 5))
     
@@ -178,7 +175,7 @@ def plot_raw_signal_with_peaks(raw_ecg, peaks, predicted_codes, dark_mode=True):
     plt.tight_layout()
     return fig
 
-def plot_beat_segment(beat_data, pred_code=None, dark_mode=True):
+def plot_beat_segment(beat_data, pred_code=None, dark_mode=False):
     set_plot_style(dark_mode)
     fig, ax = plt.subplots(figsize=(8, 3))
     
